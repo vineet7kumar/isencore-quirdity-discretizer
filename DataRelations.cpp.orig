@@ -1,0 +1,817 @@
+/*
+ * DataRelations.cpp
+ *
+ *  Created on: Jun 25, 2014
+ *      Author: vineet
+ */
+
+#include "DataRelations.h"
+#include "DataRelations_test.h"
+#include "DataAbstractor.h"
+/*
+ * Array data_abstractor is an array of levels for data_abstractor object.
+ * i.e data_abstractor[0] represents data_abstractor for level 0.
+ * each data_abstractor object gives preliminary data about each voxel and
+ * vertex in that level.
+ * Now, we need to create an object (DataRelations) that gives the following:
+ * 1.An array of levels where each element represents all the voxel and vertex
+ *   data for that level.
+ * 2.Each level contains an array of struct voxel and struct vertex combined
+ * 	 in a struct perhaps.
+ */
+
+//TODO: Add a global debug variable
+DataRelations::DataRelations() {
+//	debug = true;
+  _reader = 0;
+  _data_abstractor = 0;
+  _num_levels = 0;
+}
+
+DataRelations::DataRelations(const ReadBinvox* reader,
+    const DataAbstractor* data_abstractor, int num_levels) {
+  debug = false;
+  _reader = reader;
+  _data_abstractor = data_abstractor;
+  _num_levels = num_levels;
+  _voxel_and_vector = 0;
+
+}
+DataRelations::~DataRelations() {
+}
+
+void DataRelations::test_voxels(voxel_and_vertex_vector vox_vert_vec, int i) {
+  /*TEST*/
+  if (debug) {
+    std::cout << "Testing voxels at level " << i << "...\n";
+    for (int j = 0; j < vox_vert_vec[i].num_set_voxels; j++) {
+      std::cout << vox_vert_vec[i].voxels[j].voxel_index << " - ";
+      test_voxel_vertices(vox_vert_vec[i].voxels[j].relative_voxel_vertices,
+          vox_vert_vec[i].voxels[j].vertex_indices);
+    }
+    std::cout << "--------------------------" << std::endl;
+    test_num_set_adj_voxels(vox_vert_vec, i);
+    std::cout << "--------------------------" << std::endl;
+    test_set_adj_voxels(vox_vert_vec, i);
+    std::cout << "--------------------------" << std::endl;
+    test_children_and_parent_voxels(vox_vert_vec, i);
+  }
+}
+
+//absolute_vertex_coordinate* DataRelations::set_absolute_vertex(
+//    relative_vertex_coordinate_vector rv, DataAbstractor abstract_data_level,
+//    int width, int height, int depth) {
+//}
+
+/*
+ * Test vertices
+ */
+void DataRelations::test_vertices(voxel_and_vertex_vector vox_vert_vec, int i) {
+  if (debug) {
+    std::cout << "Testing vertices at level " << i << "...\n";
+    test_set_adj_vertices(vox_vert_vec, i);
+    std::cout << "--------------------------" << std::endl;
+    test_incident_voxels(vox_vert_vec, i);
+    std::cout << "--------------------------" << std::endl;
+    test_adj_ver_next_finer_level(vox_vert_vec, i);
+    std::cout << "--------------------------" << std::endl;
+    test_adj_ver_next_coarser_level(vox_vert_vec, i);
+  }
+}
+/*
+ * Populate relational data for each level in a loop and set the
+ * root of the data structure - an array of voxel_and_vertex.
+ */
+void DataRelations::relate_data() {
+  int num_levels = getnum_levels();
+  /*
+   * Create array of voxel_and_vertex of size = num_levels
+   */
+
+  voxel_and_vertex_vector vox_vert_vec;
+  if (num_levels > 0)
+    vox_vert_vec = new voxel_and_vertex[num_levels];
+  else {
+    std::cout << "number of levels is 0. Aborting.";
+    exit(1);
+  }
+  /*
+   * Fill in each level.
+   */
+  for (int i = 0; i < num_levels; i++) {
+    vox_vert_vec[i] = populate_level_data(getdata_abstractor(), i);
+  }
+
+  for (int i = 0; i < num_levels; i++) {
+
+    fill_voxels(getdata_abstractor()[i], vox_vert_vec[i]);
+    test_voxels(vox_vert_vec, i);
+
+    fill_vertices(getdata_abstractor()[i], vox_vert_vec[i]);
+    test_vertices(vox_vert_vec, i);
+  }
+
+  setvoxel_and_vector(vox_vert_vec);
+
+}
+/*
+ *Take in DataAbstractor and level number as argument.
+ *Calculate and fill data for that level.
+ */
+voxel_and_vertex DataRelations::populate_level_data(
+    const DataAbstractor* data_abstractor, int level) {
+  DataAbstractor abstract_data_level = data_abstractor[level];
+
+  voxel_and_vertex vv; /* return value*/
+  vv.level_num = level;
+  vv.num_total_voxels = abstract_data_level.getnum_total_voxels();
+  vv.num_total_vertices = abstract_data_level.getnum_total_vertices();
+  vv.num_set_vertices = abstract_data_level.getnum_set_vertices();
+  vv.num_set_voxels = abstract_data_level.getnum_set_voxels();
+
+<<<<<<< HEAD
+	voxel* voxels = new voxel[vv.num_set_voxels];
+	vertex* vertices = new vertex[vv.num_set_vertices];
+=======
+  voxel* voxels = new voxel[vv.num_set_vertices];
+  vertex* vertices = new vertex[vv.num_set_vertices];
+>>>>>>> eef5244a0f9eb7b68500da1b7462780309426407
+
+//	voxels = fill_voxels(abstract_data_level);
+//	vertices = fill_vertices(abstract_data_level);
+
+  vv.voxels = voxels;
+  vv.vertices = vertices;
+
+  return vv;
+
+}
+
+int* DataRelations::set_children_voxel_indices(
+    DataAbstractor abstract_data_level, int width, int height, voxel vox,
+    int level) {
+  if (0 == level) {
+    /*
+     * There are no children nodes at level 0
+     */
+    return 0;
+  } else {
+    /*
+     * All other levels will have 8 children voxels per voxel.
+     * However, these children voxel indices may refer to a voxel that is
+     * not in the geometry, or even outside the bounding box.
+     * The index for :
+     * Voxel outside the geometry but inside the box is -1
+     * Voxel outside the box is -2
+     */
+    DataAbstractor abstract_data_child = getdata_abstractor()[level - 1];
+    int* children = (int*) (malloc(8 * sizeof(int)));
+    int i = 0;
+    int _x = 2 * vox.coordinates.x, _y = 2 * vox.coordinates.y, _z = 2
+        * vox.coordinates.z;
+    int child_width = width * 2, child_height = height * 2;
+    /*
+     * For loops ensure that the child voxel will be inside the
+     * bounding box.
+     */
+    for (int z = _z; z <= _z + 1; z++) {
+      for (int y = _y; y <= _y + 1; y++) {
+        for (int x = _x; x <= _x + 1; x++) {
+          children[i] = linear_index(child_width, child_height, z, y, x);
+          if (!(abstract_data_child.getvox_zyx_vector()[children[i]])) {
+            children[i] = -1;
+          }
+          i++;
+        }
+      }
+    }
+    return children;
+  }
+
+}
+
+int DataRelations::set_parent_index(DataAbstractor abstract_data_level,
+    int width, int height, voxel vox, int level) {
+  /*
+   * Given that the parent levels are created by the -down argument to binvox
+   * we can divide the height/width by 2 to get the parent box dimensions
+   */
+  int parent_height = height / 2;
+  int parent_width = width / 2;
+
+  int _x = vox.coordinates.x / 2;
+  int _y = vox.coordinates.y / 2;
+  int _z = vox.coordinates.z / 2;
+
+  int parent_index = linear_index(parent_width, parent_height, _z, _y, _x);
+  /*
+   * Note that the parent index may contain value that is not in the geometry.
+   */
+  return parent_index;
+}
+
+int* DataRelations::set_adjacent_vertex_indices(
+    DataAbstractor abstract_data_level, int width, int height, int depth,
+    vertex& ver) {
+  int* adj_ver = (int*) (malloc(sizeof(int) * NUM_ADJACENTS/*27*/));
+  int num_set = 0;
+  ver.num_set_adjacent_vertices = num_set;
+  int index = 0;
+  int i = 0;
+  int _x = 0, _y = 0, _z = 0;
+  bool is_out_of_box = false;
+  for (int z_off = -1; z_off <= 1; z_off++) {
+    for (int y_off = -1; y_off <= 1; y_off++) {
+      for (int x_off = -1; x_off <= 1; x_off++) {
+        _x = ver.relative_coordinates.x + x_off;
+        _y = ver.relative_coordinates.y + y_off;
+        _z = ver.relative_coordinates.z + z_off;
+
+        if (_x < 0 || _x > (width - 1) || _y < 0 || _y > (height - 1) || _z < 0
+            || _z > (depth - 1)) {
+          is_out_of_box = true;
+        }
+        if (!is_out_of_box) {
+          index = linear_index(width, height,
+              ver.relative_coordinates.z + z_off,
+              ver.relative_coordinates.y + y_off,
+              ver.relative_coordinates.x + x_off);
+          //if (index != ver.vertex_index) {
+          if (abstract_data_level.getvertex_zyx_vector()[index]) {
+            adj_ver[i] = index;
+            ver.num_set_adjacent_vertices++;
+          } else {
+            adj_ver[i] = -1;
+          }
+          i++;
+          //}
+        } else {
+          //if (!(_x == ver.coordinates.x && _y == ver.coordinates.y
+          //    && _z == ver.coordinates.z)) {
+          adj_ver[i] = -1;
+          i++;
+          //}
+        }
+        is_out_of_box = false;
+
+      }
+    }
+  }
+  if (i != NUM_ADJACENTS) {
+    std::cout << i
+        << " mismatch between number of adjacent vertices and their count."
+        << std::endl;
+    exit(1);
+  }
+  return (adj_ver);
+}
+
+int* DataRelations::set_incident_voxels(DataAbstractor abstract_data_level,
+    int width, int height, int depth, vertex& ver) {
+  int* inc_vox = (int*) (malloc(sizeof(int) * 8));
+  int vox_index = 0;
+  int i = 0;
+  int _x = 0, _y = 0, _z = 0;
+  int vox_width = width - 1, vox_height = height - 1, vox_depth = depth - 1;
+  bool is_oob = false;
+  for (int z_off = -1; z_off <= 0; z_off++) {
+    for (int y_off = -1; y_off <= 0; y_off++) {
+      for (int x_off = -1; x_off <= 0; x_off++) {
+        _x = ver.relative_coordinates.x + x_off;
+        _y = ver.relative_coordinates.y + y_off;
+        _z = ver.relative_coordinates.z + z_off;
+        /*
+         * _x, _y, _z are voxel coordinates.
+         */
+        if (_x < 0 || _x >= vox_width || _y < 0 || _y >= vox_height || _z < 0
+            || _z >= vox_depth) {
+          is_oob = true;
+          inc_vox[i] = -1;
+          i++;
+        } else {
+          vox_index = linear_index(vox_width, vox_height, _z, _y, _x);
+          if (abstract_data_level.getvox_zyx_vector()[vox_index]) {
+            inc_vox[i] = vox_index;
+
+          } else {
+            inc_vox[i] = -1;
+          }
+          i++;
+        }
+        is_oob = false;
+      }
+    }
+  }
+  return (inc_vox);
+}
+
+int* DataRelations::set_adjacent_vertices_next_finer_level(
+    DataAbstractor abstract_data_level, int width, int height, int depth,
+    int level, vertex& ver) {
+  if (0 == level) {
+    /*
+     * There will be no child level
+     */
+    return 0;
+  } else {
+    int child_width = width * 2 - 1;
+    int child_height = height * 2 - 1;
+    int child_depth = depth * 2 - 1;
+    int index = 0;
+    int* adj_children = (int*) (malloc(sizeof(int) * NUM_ADJACENTS/*27*/));
+    DataAbstractor abstract_data_child = getdata_abstractor()[level - 1];
+    int x_at_child = ver.relative_coordinates.x * 2;
+    int y_at_child = ver.relative_coordinates.y * 2;
+    int z_at_child = ver.relative_coordinates.z * 2;
+    int _x = 0, _y = 0, _z = 0;
+    int i = 0;
+
+    for (int z_off = -1; z_off <= 1; z_off++) {
+      for (int y_off = -1; y_off <= 1; y_off++) {
+        for (int x_off = -1; x_off <= 1; x_off++) {
+          _x = x_at_child + x_off;
+          _y = y_at_child + y_off;
+          _z = z_at_child + z_off;
+          /*
+           * If the adjacent vertex is out of the box,
+           * do not count it.
+           */
+          if (_x < 0 || _x >= child_width || _y < 0 || _y >= child_height
+              || _z < 0 || _z >= child_depth) {
+            adj_children[i] = -1;
+            i++;
+          } else {
+            // if (!(x_off == 0 && y_off == 0 && z_off == 0)) {
+            index = linear_index(child_width, child_height, _z, _y, _x);
+            if (abstract_data_child.getvertex_zyx_vector()[index]) {
+              adj_children[i] = index;
+            } else {
+              adj_children[i] = -1;
+            }
+            i++;
+            //}
+          }
+
+        }
+      }
+    }
+    if (i != NUM_ADJACENTS) {
+      std::cout
+          << "number of calculated adjacent vertices at the next finer level != 26"
+          << std::endl;
+      exit(0);
+    }
+    return (adj_children);
+  }
+}
+
+int* DataRelations::set_adjacent_vertices_next_coarser_level(
+    DataAbstractor abstract_data_level, int width, int height, int depth,
+    int level, vertex& ver) {
+  int* adj_ver = (int*) (malloc(sizeof(int) * 8));
+  /*
+   * Set the default value to -2
+   */
+  for (int v = 0; v < 8; v++) {
+    adj_ver[v] = -2;
+  }
+  int parent_width = width % 2 == 0 ? ((width + 2) / 2) : ((width + 1) / 2);
+  int parent_height = height % 2 == 0 ? ((height + 2) / 2) : ((height + 1) / 2);
+  int parent_depth = depth % 2 == 0 ? ((depth + 2) / 2) : ((depth + 1) / 2);
+  int index = 0;
+  int i = 0;
+  int x = ver.relative_coordinates.x;
+  int y = ver.relative_coordinates.y;
+  int z = ver.relative_coordinates.z;
+  int _x = 0, _y = 0, _z = 0;
+
+  /*
+   * If x,y,z are all even, this vertex coincides with a vertex at the next
+   * coarser level - There is only one adjacent vertex, itself.
+   * If 2 of the coordinates are even (xy,yz or xz), there will be 2 adjacent
+   * vertices at +-1 from the odd coordinate.
+   * If only one coordinate is even, there will be 4 adjacent vertices, at +-1
+   * from the odd coordinates.
+   * If there are no even coordinates, there will be 8 adjacent vertices.
+   */
+  if (x % 2 == 0 && y % 2 == 0 && z % 2 == 0) {
+    /*
+     * Calculate coordinates at the parent level.
+     */
+    _x = x / 2;
+    _y = y / 2;
+    _z = z / 2;
+    if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height || _z < 0
+        || _z >= parent_depth) {
+      adj_ver[i] = -1;
+      i++;
+    } else {
+      index = linear_index(parent_width, parent_height, _z, _y, _x);
+      adj_ver[i] = index;
+      i++;
+    }
+
+  } else if (z % 2 == 0 && y % 2 == 0 && x % 2 != 0) {
+    for (int xo = -1; xo <= 1; xo += 2) {
+      _x = x + xo;
+      _y = y;
+      _z = z;
+      _x /= 2;
+      _y /= 2;
+      _z /= 2;
+      if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height
+          || _z < 0 || _z >= parent_depth) {
+        adj_ver[i] = -1;
+        i++;
+      } else {
+        index = linear_index(parent_width, parent_height, _z, _y, _x);
+        adj_ver[i] = index;
+        i++;
+      }
+    }
+  } else if (z % 2 == 0 && y % 2 != 0 && x % 2 == 0) {
+    for (int yo = -1; yo <= 1; yo += 2) {
+      _x = x;
+      _y = y + yo;
+      _z = z;
+      _x /= 2;
+      _y /= 2;
+      _z /= 2;
+      if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height
+          || _z < 0 || _z >= parent_depth) {
+        adj_ver[i] = -1;
+        i++;
+      } else {
+        index = linear_index(parent_width, parent_height, _z, _y, _x);
+        adj_ver[i] = index;
+        i++;
+      }
+    }
+  } else if (z % 2 != 0 && y % 2 == 0 && x % 2 == 0) {
+    for (int zo = -1; zo <= 1; zo += 2) {
+      _x = x;
+      _y = y;
+      _z = z + zo;
+      _x /= 2;
+      _y /= 2;
+      _z /= 2;
+      if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height
+          || _z < 0 || _z >= parent_depth) {
+        adj_ver[i] = -1;
+        i++;
+      } else {
+        index = linear_index(parent_width, parent_height, _z, _y, _x);
+        adj_ver[i] = index;
+        i++;
+      }
+    }
+  } else if (z % 2 == 0 && y % 2 != 0 && x % 2 != 0) {
+    for (int yo = -1; yo <= 1; yo += 2) {
+      for (int xo = -1; xo <= 1; xo += 2) {
+        _x = x + xo;
+        _y = y + yo;
+        _z = z;
+        _x /= 2;
+        _y /= 2;
+        _z /= 2;
+        if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height
+            || _z < 0 || _z >= parent_depth) {
+          adj_ver[i] = -1;
+          i++;
+        } else {
+          index = linear_index(parent_width, parent_height, _z, _y, _x);
+          adj_ver[i] = index;
+          i++;
+        }
+      }
+    }
+
+  } else if (z % 2 != 0 && y % 2 == 0 && x % 2 != 0) {
+    for (int zo = -1; zo <= 1; zo += 2) {
+      for (int xo = -1; xo <= 1; xo += 2) {
+        _x = x + xo;
+        _y = y;
+        _z = z + zo;
+        _x /= 2;
+        _y /= 2;
+        _z /= 2;
+        if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height
+            || _z < 0 || _z >= parent_depth) {
+          adj_ver[i] = -1;
+          i++;
+        } else {
+          index = linear_index(parent_width, parent_height, _z, _y, _x);
+          adj_ver[i] = index;
+          i++;
+        }
+      }
+    }
+  } else if (z % 2 != 0 && y % 2 != 0 && x % 2 == 0) {
+    for (int zo = -1; zo <= 1; zo += 2) {
+      for (int yo = -1; yo <= 1; yo += 2) {
+        _x = x;
+        _y = y + yo;
+        _z = z + zo;
+        _x /= 2;
+        _y /= 2;
+        _z /= 2;
+        if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height
+            || _z < 0 || _z >= parent_depth) {
+          adj_ver[i] = -1;
+          i++;
+        } else {
+          index = linear_index(parent_width, parent_height, _z, _y, _x);
+          adj_ver[i] = index;
+          i++;
+        }
+      }
+    }
+  } else if (z % 2 != 0 && y % 2 != 0 && x % 2 != 0) {
+    for (int zo = -1; zo <= 1; zo += 2) {
+      for (int yo = -1; yo <= 1; yo += 2) {
+        for (int xo = -1; xo <= 1; xo += 2) {
+          _x = x + xo;
+          _y = y + yo;
+          _z = z + zo;
+          _x /= 2;
+          _y /= 2;
+          _z /= 2;
+          if (_x < 0 || _x >= parent_width || _y < 0 || _y >= parent_height
+              || _z < 0 || _z >= parent_depth) {
+            adj_ver[i] = -1;
+            i++;
+          } else {
+            index = linear_index(parent_width, parent_height, _z, _y, _x);
+            adj_ver[i] = index;
+            i++;
+          }
+        }
+      }
+    }
+  }
+  return (adj_ver);
+}
+
+relative_vertex_coordinate_vector DataRelations::set_vertex(
+    relative_vertex_coordinate_vector vcv, int width, int height, int i,
+    voxel voxels) {
+  /*
+   * All the vertices of a voxel that is set, should be set.
+   */
+
+  /*
+   * Base co-ordinate of the voxel is
+   * the coordinate of the vertex that is
+   * relatively 0,0,0 to the voxel.
+   */
+  /*
+   * number of vertices per dimension = 1 + number of voxels per dimension.
+   */
+  width++;
+  height++;
+  int v = 0;
+  for (int z_off = 0; z_off <= 1; z_off++) {
+    for (int y_off = 0; y_off <= 1; y_off++) {
+      for (int x_off = 0; x_off <= 1; x_off++) {
+        vcv[v].is_set = voxels.coordinates.is_set;
+        vcv[v].x = x_off + voxels.coordinates.x;
+        vcv[v].y = y_off + voxels.coordinates.y;
+        vcv[v].z = z_off + voxels.coordinates.z;
+        vcv[v].i = linear_index(width, height, vcv[v].z, vcv[v].y, vcv[v].x);
+        v++;
+      }
+    }
+  }
+  return vcv;
+}
+
+int* DataRelations::set_voxel_vertices(int width, int height, int voxel_index,
+    voxel voxels) {
+  int* verts = (int*) (malloc(sizeof(int) * 8));
+  width++;
+  height++;
+  int v = 0;
+  for (int z_off = 0; z_off <= 1; z_off++) {
+    for (int y_off = 0; y_off <= 1; y_off++) {
+      for (int x_off = 0; x_off <= 1; x_off++) {
+        verts[v] = linear_index(width, height, z_off + voxels.coordinates.z,
+            y_off + voxels.coordinates.y, x_off + voxels.coordinates.x);
+        v++;
+      }
+    }
+  }
+  return (verts);
+
+}
+
+int* DataRelations::set_adjacent_voxel_indices(
+    DataAbstractor abstract_data_level, int* adj_vox, int num_adj, int width,
+    int height, int depth, voxel &vox) {
+//TODO:This (initializing) works but is it the right way/best way?
+//Where's the  call to free()
+  adj_vox = (int*) (malloc(sizeof(int) * NUM_ADJACENTS/*27*/));
+  int z_off, y_off, x_off; //between -1,0 and 1
+  int num_set = 0;
+  vox.num_set_adjacent_voxels = num_set;
+  int index;
+  int i = 0;
+  int _x, _y, _z;
+  bool is_out_of_box = false;
+  for (z_off = -1; z_off <= 1; z_off++) {
+    for (y_off = -1; y_off <= 1; y_off++) {
+      for (x_off = -1; x_off <= 1; x_off++) {
+        _x = vox.coordinates.x + x_off;
+        _y = vox.coordinates.y + y_off;
+        _z = vox.coordinates.z + z_off;
+        if (_x < 0 || _x > (width - 1))
+          is_out_of_box = true;
+        if (_y < 0 || _y > (height - 1))
+          is_out_of_box = true;
+        if (_z < 0 || _z > (depth - 1))
+          is_out_of_box = true;
+
+        if (!is_out_of_box) {
+          index = linear_index(width, height, vox.coordinates.z + z_off,
+              vox.coordinates.y + y_off, vox.coordinates.x + x_off);
+
+          //if (/*abstract_data_level.getvox_zyx_vector()[index]
+          // && */index != vox.voxel_index) {
+          if (abstract_data_level.getvox_zyx_vector()[index]) {
+            adj_vox[i] = index;
+            vox.num_set_adjacent_voxels++;
+          } else {
+            adj_vox[i] = -1;
+          }
+          i++;
+          //}
+        } else {
+          //if (!(_x == vox.coordinates.x && _y == vox.coordinates.y
+          //    && _z == vox.coordinates.z)) {
+          adj_vox[i] = -1;
+          i++;
+          //}
+        }
+        is_out_of_box = false;
+      }
+    }
+  }
+  if (i != NUM_ADJACENTS) {
+    std::cout << i << " mismatch between adjacent voxels and their count."
+        << std::endl;
+    exit(1);
+  }
+
+  return adj_vox;
+}
+
+int DataRelations::linear_index(int width, int height, int z, int y, int x) {
+  return (z * width * height + y * width + x);
+}
+
+void DataRelations::fill_voxels(DataAbstractor abstract_data_level,
+    voxel_and_vertex &vv_l) {
+  int num_set_voxels = abstract_data_level.getnum_set_voxels();
+  int level = vv_l.level_num;
+  voxel* voxels = vv_l.voxels;
+  const int* set_voxel_indices = abstract_data_level.getset_voxels_vector();
+  const vox_coordinate* vox_coordinate_array =
+      abstract_data_level.getvox_coordinate_array();
+  int voxel_index = 0;
+
+  ReadBinvox temp1 = getreader()[level];
+  int height = temp1.getBinvoxData()->height;
+  int width = temp1.getBinvoxData()->width;
+  int depth = temp1.getBinvoxData()->depth;
+  for (int i = 0; i < num_set_voxels; i++) {
+
+    voxel_index = set_voxel_indices[i];
+    /*
+     * voxel[i] is inside the geometry.
+     */
+    voxels[i].geometric_pos = 1;
+    voxels[i].voxel_index = set_voxel_indices[i];
+    voxels[i].coordinates = vox_coordinate_array[voxel_index];
+
+    /*
+     * Populate the 8 vertices of the voxel.
+     */
+    relative_vertex_coordinate_vector vcv = new relative_vertex_coordinate[8];
+    voxels[i].relative_voxel_vertices = set_vertex(vcv, width, height,
+        voxel_index, voxels[i]);
+    voxels[i].vertex_indices = set_voxel_vertices(width, height, voxel_index,
+        voxels[i]);
+    /*
+     * populate the absolute values of the 8 vertices
+     */
+
+    /*
+     * create an array of indices corresponding to the adjacent arrays
+     */
+    int* adj_vox = (int*) malloc(
+        sizeof(int) * voxels[i].num_set_adjacent_voxels); //[voxels[i].num_set_adjacent_voxels];
+    adj_vox = 0;
+    voxels[i].adjacent_voxels = set_adjacent_voxel_indices(abstract_data_level,
+        adj_vox, voxels[i].num_set_adjacent_voxels, width, height, depth,
+        voxels[i]);
+
+    /*
+     * Create an array of indices corresponding to children voxels.
+     * Indices are at the children's level.
+     */
+    voxels[i].children_voxels = set_children_voxel_indices(abstract_data_level,
+        width, height, voxels[i], level);
+    /*
+     * Get the index corresponding to the parent.
+     * Index at the parent level.
+     */
+    voxels[i].parent = set_parent_index(abstract_data_level, width, height,
+        voxels[i], level);
+  }
+//return voxels;
+}
+
+void DataRelations::fill_vertices(DataAbstractor abstract_data_level,
+    voxel_and_vertex &vv_l) {
+  int num_set_vertices = abstract_data_level.getnum_set_vertices();
+  int level = vv_l.level_num;
+  vertex* vertices = vv_l.vertices;
+  const int* set_vertex_indices = abstract_data_level.getset_vertex_vector();
+  const relative_vertex_coordinate* relative_vertex_coordinate_array =
+      abstract_data_level.getvertex_coordinate_array();
+  const absolute_vertex_coordinate* absolute_vertex_coordinate_array =
+      abstract_data_level.getabsolute_vertex_coordiante_array();
+
+  ReadBinvox temp1 = getreader()[level];
+  int height = temp1.getBinvoxData()->height + 1;
+  int width = temp1.getBinvoxData()->width + 1;
+  int depth = temp1.getBinvoxData()->depth + 1;
+
+  for (int i = 0; i < num_set_vertices; i++) {
+    vertices[i].vertex_index = set_vertex_indices[i];
+    vertices[i].relative_coordinates =
+        relative_vertex_coordinate_array[vertices[i].vertex_index];
+    vertices[i].absolute_coordinates =
+        absolute_vertex_coordinate_array[vertices[i].vertex_index];
+//DELETE the cout below
+//    std::cout << i << ": " << vertices[i].relative_coordinates.x << " "
+//        << vertices[i].relative_coordinates.y << " "
+//        << vertices[i].relative_coordinates.z << " | "
+//        << vertices[i].absolute_coordinates.x << " "
+//        << vertices[i].absolute_coordinates.y << " "
+//        << vertices[i].absolute_coordinates.z << std::endl;
+    /*
+     * Create an array of indices, representing the adjacent vertices
+     * of this vertex. Also set the number of set adjacent vertices.
+     */
+    vertices[i].adjacent_vertices = set_adjacent_vertex_indices(
+        abstract_data_level, width, height, depth, vertices[i]);
+    /*
+     * Create an array of indices, representing the 8 voxels incident on
+     * a vertex
+     */
+    vertices[i].incident_voxels = set_incident_voxels(abstract_data_level,
+        width, height, depth, vertices[i]);
+    /*
+     * Create an array of indices for adjacent vertices at the next
+     * finer level.
+     */
+    vertices[i].adjacent_vertices_next_finer_level =
+        set_adjacent_vertices_next_finer_level(abstract_data_level, width,
+            height, depth, level, vertices[i]);
+    /*
+     * create an array of indices for adjacent vertices at the next coarser
+     * level.
+     */
+    vertices[i].adjacent_vertices_next_coarser_level =
+        set_adjacent_vertices_next_coarser_level(abstract_data_level, width,
+            height, depth, level, vertices[i]);
+
+  }
+
+}
+/*
+ * Calculate the absolute vertex coordinates from the relative coordinates
+ * using the scale and translation values.
+ */
+absolute_vertex_coordinate DataRelations::calculateAbsoluteCoordinates(
+    relative_vertex_coordinate relative_coordinates,
+    DataAbstractor abstract_data_level, int width, int height, int depth) {
+  /*
+   * scale is the length of the longest edge of the geometry and is used to
+   * scale the geometry to fit into 1x1x1 box.
+   */
+  float scale = abstract_data_level.getscale();
+  DataAbstractor::translate_offset t_off = abstract_data_level.gettranslate();
+  double vox_width = (double) (scale / width);
+  double vox_height = (double) (scale / height);
+  double vox_depth = (double) (scale / depth);
+
+  absolute_vertex_coordinate abs_ver;
+  abs_ver.x = (double) (vox_width * relative_coordinates.x) + (double) t_off.tx;
+  abs_ver.y = (double) (vox_height * relative_coordinates.y)
+      + (double) t_off.ty;
+  abs_ver.z = (double) (vox_depth * relative_coordinates.z) + (double) t_off.tz;
+  abs_ver.i = relative_coordinates.i;
+  abs_ver.is_set = relative_coordinates.is_set;
+  return (abs_ver);
+}
